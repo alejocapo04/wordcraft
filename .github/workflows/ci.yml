@@ -15,14 +15,14 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       RUST_TEST_THREADS: "1"
       WGPU_BACKEND: vulkan
-      EXPECTED_SOURCE_SHA: "81d4a8abf71d61208ebe019206b814f2f782e705"
+      EXPECTED_SOURCE_SHA: "ecc041749f857a413cb1d4366353b64fd0ec3b6b"
       CARGO_CACHE_AUTO_CLEAN_FREQUENCY: "never"
       NEXTEST_TEST_THREADS: "1"
       RUST_BACKTRACE: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: "81d4a8abf71d61208ebe019206b814f2f782e705"
+          ref: "ecc041749f857a413cb1d4366353b64fd0ec3b6b"
           persist-credentials: false
       - name: Prepare runtime environment before tool setup
         shell: bash
@@ -102,6 +102,29 @@ jobs:
           assert p.read_bytes()==original
           subprocess.run(['git','diff','--exit-code','--','crates/ui-egui/src/file_providers.rs'],check=True)
           PY
+      - name: "Prove bound-copy regressions fail on the old commands handler"
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -c credential.helper= fetch --no-tags --depth=1 origin 81d4a8abf71d61208ebe019206b814f2f782e705
+          timeout 45m python3 - <<'PY'
+          import os,pathlib,subprocess
+          p=pathlib.Path('crates/ui-egui/src/app/commands.rs')
+          original=p.read_bytes()
+          old=subprocess.check_output(['git','show','81d4a8abf71d61208ebe019206b814f2f782e705:crates/ui-egui/src/app/commands.rs'])
+          assert old!=original, 'Expected the published bound-copy protection'
+          try:
+              p.write_bytes(old)
+              r=subprocess.run(['cargo','test','--locked','-p','wordcraft-ui-egui','--lib','bound_explicit_','-j2','--','--test-threads=1'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,env=dict(os.environ,CARGO_TERM_COLOR='never'),timeout=2400)
+              names=['bound_explicit_export_and_template_copies_keep_provider_changes_dirty_until_ack','bound_explicit_browser_copy_does_not_acknowledge_provider_persistence','bound_explicit_copy_keeps_a_comment_draft_flushed_by_save_dirty_until_provider_ack']
+              assert r.returncode!=0 and all(name+' ... FAILED' in r.stdout for name in names), 'Expected real pre-fix failures for all bound-copy regressions: '+r.stdout[-12000:]
+              print('All three bound-copy regressions fail on the original commands handler')
+              print(r.stdout[-6000:])
+          finally:
+              p.write_bytes(original)
+          assert p.read_bytes()==original
+          subprocess.run(['git','diff','--exit-code','--','crates/ui-egui/src/app/commands.rs'],check=True)
+          PY
       - name: "All affected native tests on restored published source"
         shell: bash
         run: |
@@ -144,7 +167,7 @@ jobs:
       - name: Upload tested source provenance
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: provider-checks-wordcraft-81d4a8abf71d
+          name: provider-checks-wordcraft-ecc041749f85
           path: |
             ${{ runner.temp }}/provider-evidence/provenance.json
           if-no-files-found: error
